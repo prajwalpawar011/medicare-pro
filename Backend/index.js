@@ -54,32 +54,34 @@ app.post('/login', async (req, res) => {
 });
 
 // --- PATIENT PORTAL ROUTES ---
+// Store portal users in a separate collection 'PortalUsers'
 app.post('/patient/register', async (req, res) => {
     try {
-        const { name, email, password, phone, dateOfBirth } = req.body;
+        const { name, email, password, phone, age, dateOfBirth } = req.body;
         
-        const existingPatient = await db.collection('Patient').findOne({ email });
-        if (existingPatient) {
+        const existingUser = await db.collection('PortalUsers').findOne({ email });
+        if (existingUser) {
             return res.status(400).json({ error: "Email already registered" });
         }
         
-        const newPatient = {
+        const newPortalUser = {
             name,
             email,
             password,
             phone,
-            dateOfBirth,
-            role: 'patient',
+            age: age ? parseInt(age) : null,
+            dateOfBirth: dateOfBirth || null,
+            status: 'Active',
             createdAt: new Date()
         };
         
-        const result = await db.collection('Patient').insertOne(newPatient);
+        const result = await db.collection('PortalUsers').insertOne(newPortalUser);
         const token = jwt.sign({ id: result.insertedId, email, role: 'patient' }, SECRET_KEY, { expiresIn: '24h' });
         
         res.status(201).json({ 
             success: true, 
             token, 
-            patient: { id: result.insertedId, name, email, role: 'patient' }
+            patient: { id: result.insertedId, name, email, age: age, role: 'patient' }
         });
     } catch (err) {
         console.error("Patient Registration Error:", err);
@@ -90,7 +92,7 @@ app.post('/patient/register', async (req, res) => {
 app.post('/patient/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const patient = await db.collection('Patient').findOne({ email, password, role: 'patient' });
+        const patient = await db.collection('PortalUsers').findOne({ email, password });
         
         if (!patient) {
             return res.status(401).json({ error: "Invalid email or password" });
@@ -100,7 +102,7 @@ app.post('/patient/login', async (req, res) => {
         res.json({ 
             success: true, 
             token, 
-            patient: { id: patient._id, name: patient.name, email: patient.email, role: 'patient' }
+            patient: { id: patient._id, name: patient.name, email: patient.email, age: patient.age }
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -139,17 +141,19 @@ app.post('/patient/request-appointment', async (req, res) => {
         const decoded = jwt.verify(token, SECRET_KEY);
         const { doctorId, doctorName, appointmentDate, reason } = req.body;
         
-        const patient = await db.collection('Patient').findOne({ _id: new ObjectId(decoded.id) });
+        const patient = await db.collection('PortalUsers').findOne({ _id: new ObjectId(decoded.id) });
         
         const newAppointment = {
             patientId: decoded.id.toString(),
             patientName: patient.name,
+            patientAge: patient.age,
+            patientEmail: patient.email,
             doctorId,
             doctorName,
             appointmentDate,
             reason,
             status: 'Pending',
-            createdBy: 'patient',
+            source: 'patient_portal',
             createdAt: new Date()
         };
         
@@ -182,6 +186,28 @@ app.put('/update/appointment/:id/status', async (req, res) => {
     }
 });
 
+// --- UPDATE PATIENT STATUS (Only for staff patients) ---
+app.put('/update/patient/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        
+        const result = await db.collection('Patient').updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { status: status } }
+        );
+        
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({ error: "Patient not found" });
+        }
+        
+        res.json({ success: true, message: `Patient status updated to ${status}` });
+    } catch (err) {
+        console.error("Update Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- UNIVERSAL CRUD ROUTES ---
 app.post('/add/:collection', async (req, res) => {
     try {
@@ -190,6 +216,7 @@ app.post('/add/:collection', async (req, res) => {
         const data = req.body;
 
         console.log(`📥 Adding new record to: ${target}`);
+        
         const result = await db.collection(target).insertOne(data);
         
         res.status(201).json({ message: "Success", id: result.insertedId });
@@ -204,7 +231,17 @@ app.get('/get/:collection', async (req, res) => {
         const collectionName = req.params.collection.toLowerCase();
         const target = collectionMap[collectionName] || collectionName;
         
-        const data = await db.collection(target).find({}).toArray();
+        let data;
+        if (target === 'Patient') {
+            // Only get from Patient collection (staff-added patients only)
+            data = await db.collection(target).find({}).toArray();
+        } else if (target === 'Appoinment') {
+            // Get all appointments
+            data = await db.collection(target).find({}).toArray();
+        } else {
+            data = await db.collection(target).find({}).toArray();
+        }
+        
         console.log(`🔎 GET request for: ${target} (Found ${data.length} records)`);
         res.json(data);
     } catch (err) {

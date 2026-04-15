@@ -18,9 +18,9 @@ function App() {
   const [patientToken, setPatientToken] = useState(localStorage.getItem('patientToken'));
   const [patientData, setPatientData] = useState(null);
   const [showPatientRegister, setShowPatientRegister] = useState(false);
-  const [isPatientLoginMode, setIsPatientLoginMode] = useState(true); // NEW: tracks login vs register mode
+  const [isPatientLoginMode, setIsPatientLoginMode] = useState(true);
   const [patientLoginData, setPatientLoginData] = useState({ email: '', password: '' });
-  const [patientRegisterData, setPatientRegisterData] = useState({ name: '', email: '', password: '', phone: '', dateOfBirth: '' });
+  const [patientRegisterData, setPatientRegisterData] = useState({ name: '', email: '', password: '', phone: '', age: '', dateOfBirth: '' });
   const [availableDoctors, setAvailableDoctors] = useState([]);
   const [showBookingForm, setShowBookingForm] = useState(false);
   const [bookingData, setBookingData] = useState({ doctorId: '', doctorName: '', appointmentDate: '', reason: '' });
@@ -58,7 +58,13 @@ function App() {
   const handlePatientRegister = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/patient/register', patientRegisterData);
+      const registerData = {
+        ...patientRegisterData,
+        age: parseInt(patientRegisterData.age),
+        details: patientRegisterData.age
+      };
+      
+      const res = await axios.post('http://localhost:5000/patient/register', registerData);
       if (res.data.success) {
         localStorage.setItem('patientToken', res.data.token);
         setPatientToken(res.data.token);
@@ -172,6 +178,16 @@ function App() {
     }
   };
 
+  const updatePatientStatus = async (id, newStatus) => {
+    try {
+      await axios.put(`http://localhost:5000/update/patient/${id}/status`, { status: newStatus });
+      alert(`✅ Patient status updated to ${newStatus}`);
+      fetchData('Patients');
+    } catch (err) {
+      alert("❌ Error updating status");
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) fetchData('Patients');
   }, [isAuthenticated]);
@@ -276,7 +292,7 @@ function App() {
                     className={`nav-link ${!isPatientLoginMode ? 'active' : ''}`} 
                     onClick={() => {
                       setIsPatientLoginMode(false);
-                      setPatientRegisterData({ name: '', email: '', password: '', phone: '', dateOfBirth: '' });
+                      setPatientRegisterData({ name: '', email: '', password: '', phone: '', age: '', dateOfBirth: '' });
                     }}
                   >
                     Register
@@ -349,11 +365,21 @@ function App() {
                       onChange={(e) => setPatientRegisterData({...patientRegisterData, phone: e.target.value})} 
                     />
                   </div>
+                  <div className="mb-2">
+                    <input 
+                      type="number" 
+                      className="form-control" 
+                      placeholder="Age" 
+                      required
+                      value={patientRegisterData.age}
+                      onChange={(e) => setPatientRegisterData({...patientRegisterData, age: e.target.value})} 
+                    />
+                  </div>
                   <div className="mb-3">
                     <input 
                       type="date" 
                       className="form-control" 
-                      placeholder="Date of Birth" 
+                      placeholder="Date of Birth (Optional)" 
                       value={patientRegisterData.dateOfBirth}
                       onChange={(e) => setPatientRegisterData({...patientRegisterData, dateOfBirth: e.target.value})} 
                     />
@@ -378,6 +404,7 @@ function App() {
               <p className="mb-0">Welcome,</p>
               <h5>{patientData?.name}</h5>
               <small>{patientData?.email}</small>
+              {patientData?.age && <div><small>Age: {patientData.age}</small></div>}
             </div>
             <hr />
             <button className="btn btn-outline-light w-100 mb-2" onClick={() => {
@@ -420,13 +447,20 @@ function App() {
                       <label className="form-label">Reason for Visit</label>
                       <textarea className="form-control" rows="3" required onChange={(e) => setBookingData({...bookingData, reason: e.target.value})}></textarea>
                     </div>
+                    <div className="alert alert-info mt-3">
+                      <small>
+                        <strong>📌 Note:</strong> After booking, your appointment status will be <strong>"Pending"</strong>. 
+                        Please wait for staff confirmation.
+                      </small>
+                    </div>
                     <button type="submit" className="btn btn-primary">Submit Request</button>
                     <button type="button" className="btn btn-secondary ms-2" onClick={() => setShowBookingForm(false)}>Cancel</button>
                   </form>
                 ) : (
                   <table className="table table-hover">
-                    <thead>
+                    <thead className="table-light">
                       <tr>
+                        <th>#</th>
                         <th>Doctor</th>
                         <th>Date & Time</th>
                         <th>Reason</th>
@@ -435,17 +469,22 @@ function App() {
                     </thead>
                     <tbody>
                       {patientAppointments.length === 0 ? (
-                        <tr><td colSpan="4" className="text-center">No appointments found</td></tr>
+                        <tr><td colSpan="5" className="text-center py-5">No appointments found</td></tr>
                       ) : (
                         patientAppointments.map((apt, idx) => (
                           <tr key={idx}>
+                            <td>{idx + 1}</td>
                             <td><strong>{apt.doctorName}</strong></td>
                             <td>{new Date(apt.appointmentDate).toLocaleString()}</td>
                             <td>{apt.reason}</td>
                             <td>
-                              <span className={`badge ${apt.status === 'Confirmed' ? 'bg-success' : apt.status === 'Pending' ? 'bg-warning' : 'bg-danger'}`}>
-                                {apt.status}
-                              </span>
+                              {apt.status === 'Confirmed' ? (
+                                <span className="badge bg-success">✅ Confirmed</span>
+                              ) : apt.status === 'Pending' ? (
+                                <span className="badge bg-warning text-dark">⏳ Pending</span>
+                              ) : (
+                                <span className="badge bg-danger">❌ Cancelled</span>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -615,13 +654,29 @@ function App() {
                           <option value="Confirmed">Confirmed</option>
                           <option value="Cancelled">Cancelled</option>
                         </select>
+                      ) : activeTab === 'Patients' ? (
+                        <select 
+                          className={`form-select form-select-sm ${item.status === 'Admitted' ? 'bg-primary text-white' : 
+                                     item.status === 'Recovered' ? 'bg-success text-white' : 
+                                     item.status === 'Discharged' ? 'bg-secondary text-white' :
+                                     'bg-primary text-white'}`}
+                          value={item.status || 'Admitted'}
+                          style={{ width: '130px', fontSize: '12px' }}
+                          onChange={(e) => updatePatientStatus(item._id, e.target.value)}
+                        >
+                          <option value="Admitted">🏥 Admitted</option>
+                          <option value="Recovered">✅ Recovered</option>
+                          <option value="Discharged">🚪 Discharged</option>
+                        </select>
                       ) : (
                         <span className={`badge rounded-pill ${['Confirmed', 'Admitted', 'Paid', 'Completed', 'In Stock', 'On Duty'].includes(item.status) ? 'bg-success' : ['Pending', 'Unpaid', 'Report Pending', 'Sample Collected'].includes(item.status) ? 'bg-warning text-dark' : 'bg-danger'}`}>
                           {item.status}
                         </span>
                       )}
                     </td>
-                    <td className="text-center"><button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(item._id)}>🗑</button></td>
+                    <td className="text-center">
+                      <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(item._id)}>🗑</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
