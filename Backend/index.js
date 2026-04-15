@@ -109,3 +109,5 @@ app.delete('/delete/:collection/:id', async (req, res) => {
 app.get('/', (req, res) => res.send("Hospital Universal API is Online!"));
 
 start();
+
+
