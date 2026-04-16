@@ -134,14 +134,43 @@ function App() {
     setPatientAppointments([]);
   };
 
-  // --- DATA LOGIC ---
+  // --- FORMAT TIME FUNCTION (Uppercase AM/PM, no seconds) ---
   const formatTime = (timeString) => {
     if (!timeString) return "N/A";
-    const [hour, minute] = timeString.split(':');
-    const h = parseInt(hour);
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const formattedHour = h % 12 || 12;
-    return `${formattedHour}:${minute} ${ampm}`;
+    
+    let hours, minutes;
+    
+    if (timeString.includes(':')) {
+      const parts = timeString.split(':');
+      hours = parseInt(parts[0]);
+      minutes = parts[1];
+      
+      if (minutes.includes(' ')) {
+        minutes = minutes.split(' ')[0];
+      }
+      if (minutes.length > 2) {
+        minutes = minutes.substring(0, 2);
+      }
+    } else {
+      return timeString;
+    }
+    
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const formattedHour = hours % 12 || 12;
+    return `${formattedHour}:${minutes} ${ampm}`;
+  };
+
+  // --- FORMAT DATE & TIME FOR PATIENT PORTAL ---
+  const formatDateTime = (dateString) => {
+    if (!dateString) return "N/A";
+    const date = new Date(dateString);
+    const formattedDate = date.toLocaleDateString();
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    const formattedTime = `${hours}:${minutes} ${ampm}`;
+    return `${formattedDate} ${formattedTime}`;
   };
 
   const fetchData = async (tabName) => {
@@ -473,9 +502,9 @@ function App() {
                       ) : (
                         patientAppointments.map((apt, idx) => (
                           <tr key={idx}>
-                            <td>{idx + 1}</td>
+                            <td className="text-muted">{idx + 1}</td>
                             <td><strong>{apt.doctorName}</strong></td>
-                            <td>{new Date(apt.appointmentDate).toLocaleString()}</td>
+                            <td>{formatDateTime(apt.appointmentDate)}</td>
                             <td>{apt.reason}</td>
                             <td>
                               {apt.status === 'Confirmed' ? (
@@ -622,63 +651,83 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((item, index) => (
-                  <tr key={item._id || index}>
-                    <td className="text-muted small">{index + 1}</td>
-                    <td className="fw-bold">{item.patientName || item.name || "N/A"}</td>
-                    <td>
-                      {activeTab === 'Appointments' ? (
-                        <div>
-                          <strong>{item.doctorName?.startsWith('Dr.') ? item.doctorName : `Dr. ${item.doctorName}`}</strong><br/>
-                          <small className="text-muted">📅 {item.date || (item.appointmentDate ? new Date(item.appointmentDate).toLocaleDateString() : 'N/A')} | 🕒 {item.time ? formatTime(item.time) : (item.appointmentDate ? new Date(item.appointmentDate).toLocaleTimeString() : 'N/A')}</small>
-                          {item.description && <p className="mb-0 small italic">📝 {item.description}</p>}
-                          {item.reason && !item.description && <p className="mb-0 small italic">📝 {item.reason}</p>}
-                        </div>
-                      ) : (
-                        <span>{activeTab === 'Billing' ? `₹${item.details}` : item.details}</span>
-                      )}
-                    </td>
-                    {activeTab === 'Billing' && <>
-                      <td>{item.service}</td>
-                      <td><small className="fw-bold">{item.paymentMethod}</small></td>
-                    </>}
-                    <td>
-                      {activeTab === 'Appointments' ? (
-                        <select 
-                          className={`form-select form-select-sm ${item.status === 'Confirmed' ? 'bg-success text-white' : item.status === 'Pending' ? 'bg-warning' : 'bg-danger text-white'}`}
-                          value={item.status}
-                          style={{ width: '120px' }}
-                          onChange={(e) => updateAppointmentStatus(item._id, e.target.value)}
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="Confirmed">Confirmed</option>
-                          <option value="Cancelled">Cancelled</option>
-                        </select>
-                      ) : activeTab === 'Patients' ? (
-                        <select 
-                          className={`form-select form-select-sm ${item.status === 'Admitted' ? 'bg-primary text-white' : 
-                                     item.status === 'Recovered' ? 'bg-success text-white' : 
-                                     item.status === 'Discharged' ? 'bg-secondary text-white' :
-                                     'bg-primary text-white'}`}
-                          value={item.status || 'Admitted'}
-                          style={{ width: '130px', fontSize: '12px' }}
-                          onChange={(e) => updatePatientStatus(item._id, e.target.value)}
-                        >
-                          <option value="Admitted">🏥 Admitted</option>
-                          <option value="Recovered">✅ Recovered</option>
-                          <option value="Discharged">🚪 Discharged</option>
-                        </select>
-                      ) : (
-                        <span className={`badge rounded-pill ${['Confirmed', 'Admitted', 'Paid', 'Completed', 'In Stock', 'On Duty'].includes(item.status) ? 'bg-success' : ['Pending', 'Unpaid', 'Report Pending', 'Sample Collected'].includes(item.status) ? 'bg-warning text-dark' : 'bg-danger'}`}>
-                          {item.status}
-                        </span>
-                      )}
-                    </td>
-                    <td className="text-center">
-                      <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(item._id)}>🗑</button>
-                    </td>
-                  </tr>
-                ))}
+                {list.map((item, index) => {
+                  // Format time to uppercase AM/PM for staff appointments
+                  let formattedTime = "N/A";
+                  if (activeTab === 'Appointments') {
+                    if (item.time) {
+                      formattedTime = formatTime(item.time);
+                    } else if (item.appointmentDate) {
+                      const date = new Date(item.appointmentDate);
+                      let hours = date.getHours();
+                      const minutes = date.getMinutes().toString().padStart(2, '0');
+                      const ampm = hours >= 12 ? 'PM' : 'AM';
+                      hours = hours % 12 || 12;
+                      formattedTime = `${hours}:${minutes} ${ampm}`;
+                    }
+                  }
+                  
+                  return (
+                    <tr key={item._id || index}>
+                      <td className="text-muted small">{index + 1}</td>
+                      <td className="fw-bold">{item.patientName || item.name || "N/A"}</td>
+                      <td>
+                        {activeTab === 'Appointments' ? (
+                          <div>
+                            <strong>{item.doctorName?.startsWith('Dr.') ? item.doctorName : `Dr. ${item.doctorName}`}</strong><br/>
+                            <small className="text-muted">
+                              📅 {item.date || (item.appointmentDate ? new Date(item.appointmentDate).toLocaleDateString() : 'N/A')} 
+                              | 🕒 {formattedTime}
+                            </small>
+                            {item.description && <p className="mb-0 small italic">📝 {item.description}</p>}
+                            {item.reason && !item.description && <p className="mb-0 small italic">📝 {item.reason}</p>}
+                          </div>
+                        ) : (
+                          <span>{activeTab === 'Billing' ? `₹${item.details}` : item.details}</span>
+                        )}
+                      </td>
+                      {activeTab === 'Billing' && <>
+                        <td>{item.service}</td>
+                        <td><small className="fw-bold">{item.paymentMethod}</small></td>
+                      </>}
+                      <td>
+                        {activeTab === 'Appointments' ? (
+                          <select 
+                            className={`form-select form-select-sm ${item.status === 'Confirmed' ? 'bg-success text-white' : item.status === 'Pending' ? 'bg-warning' : 'bg-danger text-white'}`}
+                            value={item.status}
+                            style={{ width: '120px' }}
+                            onChange={(e) => updateAppointmentStatus(item._id, e.target.value)}
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Confirmed">Confirmed</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                        ) : activeTab === 'Patients' ? (
+                          <select 
+                            className={`form-select form-select-sm ${item.status === 'Admitted' ? 'bg-primary text-white' : 
+                                       item.status === 'Recovered' ? 'bg-success text-white' : 
+                                       item.status === 'Discharged' ? 'bg-secondary text-white' :
+                                       'bg-primary text-white'}`}
+                            value={item.status || 'Admitted'}
+                            style={{ width: '130px', fontSize: '12px' }}
+                            onChange={(e) => updatePatientStatus(item._id, e.target.value)}
+                          >
+                            <option value="Admitted">🏥 Admitted</option>
+                            <option value="Recovered">✅ Recovered</option>
+                            <option value="Discharged">🚪 Discharged</option>
+                          </select>
+                        ) : (
+                          <span className={`badge rounded-pill ${['Confirmed', 'Admitted', 'Paid', 'Completed', 'In Stock', 'On Duty'].includes(item.status) ? 'bg-success' : ['Pending', 'Unpaid', 'Report Pending', 'Sample Collected'].includes(item.status) ? 'bg-warning text-dark' : 'bg-danger'}`}>
+                            {item.status}
+                          </span>
+                        )}
+                      </td>
+                      <td className="text-center">
+                        <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(item._id)}>🗑</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
